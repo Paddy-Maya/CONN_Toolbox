@@ -1,0 +1,402 @@
+%clc; clear all; close all;
+
+
+%CONN complete programming along with group analysis
+function contool_box_group_analysis (path,nsubjects)
+%specifying number of subjects
+NSUBJECTS = nsubjects;
+
+%specifying the path of the data
+cwd = path;
+
+%specifying the path for functional and structutral data
+FUNCTIONAL_FILE = cellstr(conn_dir('sub-*_ses-01_task-rest_space-MNI152NLin2009cAsym_desc-preproc_bold.nii.gz'));
+STRUCTURAL_FILE = cellstr(conn_dir('sub-*_ses-01_space-MNI152NLin2009cAsym_desc-preproc_T1w.nii.gz'));
+
+%specifying covariates to each subject
+for n= 1:9
+    confounds_file{1,n} = conn_loadtextfile(strcat('sub-0',num2str(n),'/ses-01/func/sub-0',num2str(n),'_ses-01_task-rest_desc-confounds_timeseries.tsv'));
+end
+clear n;
+for n= 10:NSUBJECTS
+    confounds_file{1,n} = conn_loadtextfile(strcat('sub-',num2str(n),'/ses-01/func/sub-',num2str(n),'_ses-01_task-rest_desc-confounds_timeseries.tsv'));
+end
+%Error message displays when there is a dimentional mismatch in the inputs
+if rem(length(FUNCTIONAL_FILE),NSUBJECTS),error('mismatch number of functional files %n', length(FUNCTIONAL_FILE));end
+if rem(length(STRUCTURAL_FILE),NSUBJECTS),error('mismatch number of anatomical files %n', length(STRUCTURAL_FILE));end
+
+%specifying number of sessions
+nsessions=length(FUNCTIONAL_FILE)/NSUBJECTS;
+
+%rearranging the file sizes for the analysis
+FUNCTIONAL_FILE=reshape(FUNCTIONAL_FILE,[nsessions, NSUBJECTS]);
+STRUCTURAL_FILE=reshape(STRUCTURAL_FILE,[nsessions, NSUBJECTS]);
+disp([num2str(size(FUNCTIONAL_FILE,1)),' sessions']);
+disp([num2str(size(FUNCTIONAL_FILE,2)),' subjects']);
+
+%Repetition time
+TR=3;
+
+%clearing any previous batch present 
+clear batch;
+
+%giving a new name to the batch 
+batch.filename = fullfile(cwd,'conn_adcnmci_compare4.mat');
+
+%batch.Setup .....
+batch.Setup.isnew=1;
+batch.Setup.nsubjects=NSUBJECTS; %number of subjects
+batch.Setup.RT=TR;                                        % TR (seconds)
+batch.Setup.functionals=repmat({{}},[NSUBJECTS,1]);       % Point to functional volumes for each subject/session
+for nsub=1:NSUBJECTS,for nses=1:nsessions
+        batch.Setup.functionals{nsub}{nses}{1}=FUNCTIONAL_FILE{nses,nsub}; end; end %note: each subject's data is defined by three sessions and one single (4d) file per session
+
+batch.Setup.structurals=STRUCTURAL_FILE;                  % Point to anatomical volumes for each subject
+
+nconditions=nsessions;                                  % treats each session as a different condition
+
+
+%defining conditions and it's timing
+if nconditions==1
+    batch.Setup.conditions.names={'rest'};
+    
+    for ncond=1
+        for nsub=1:NSUBJECTS
+            for nses=1:nsessions
+                batch.Setup.conditions.onsets{ncond}{nsub}{nses}=0;
+                batch.Setup.conditions.durations{ncond}{nsub}{nses}=inf;
+            end
+        end
+    end     % rest condition (all sessions)
+else
+    batch.Setup.conditions.names=[{'rest'}, arrayfun(@(n)sprintf('Session%d',n),1:nconditions,'uni',0)];
+    for ncond=1,for nsub=1:NSUBJECTS,for nses=1:nsessions,              batch.Setup.conditions.onsets{ncond}{nsub}{nses}=0; batch.Setup.conditions.durations{ncond}{nsub}{nses}=inf;end;end;end     % rest condition (all sessions)
+    for ncond=1:nconditions,for nsub=1:NSUBJECTS,for nses=1:nsessions,  batch.Setup.conditions.onsets{1+ncond}{nsub}{nses}=[];batch.Setup.conditions.durations{1+ncond}{nsub}{nses}=[]; end;end;end
+    for ncond=1:nconditions,for nsub=1:NSUBJECTS,for nses=ncond,        batch.Setup.conditions.onsets{1+ncond}{nsub}{nses}=0; batch.Setup.conditions.durations{1+ncond}{nsub}{nses}=inf;end;end;end % session-specific conditions
+end
+
+%enables input of covariates file from outside
+batch.Setup.covariates.add = 1;
+
+for nsub=1:9
+    mat{nsub} = conn_loadtextfile(strcat(cwd,'/sub-0',num2str(nsub),'/ses-01/func/sub-0',num2str(nsub),'_ses-01_task-rest_desc-confounds_timeseries.tsv'));
+    %mat{nsub} = conn_loadtextfile(strcat('sub-0',num2str(nsub),'_ses-01_task-rest_desc-confounds_timeseries.tsv'));
+    mat1{nsub} = struct2cell(mat{1,nsub});
+end
+for nsub=10:NSUBJECTS
+    mat{nsub} = conn_loadtextfile(strcat(cwd,'/sub-',num2str(nsub),'/ses-01/func/sub-',num2str(nsub),'_ses-01_task-rest_desc-confounds_timeseries.tsv'));
+    %mat{nsub} = conn_loadtextfile(strcat('sub-0',num2str(nsub),'_ses-01_task-rest_desc-confounds_timeseries.tsv'));
+    mat1{nsub} = struct2cell(mat{1,nsub});
+end
+
+[new_mat,names] = confounds(mat,NSUBJECTS);
+batch.Setup.covariates.names = names;
+new_mat = fixnan(new_mat);
+
+%mentioning the covariates files
+for nsub = 1:NSUBJECTS
+    for ncov = 1:size(new_mat,2)
+        batch.Setup.covariates.files{ncov}{nsub}{1} = new_mat{nsub,ncov};
+    end
+end
+
+
+
+%Setting up groups
+batch.Setup.subjects.groups = [1; %1
+    1; %2
+    1; %3
+    1; %4
+    1; %5
+    1; %6
+    1; %7
+    1; %8
+    2; %9 
+    2; %10
+    2; %11
+    2; %12
+    2; %13
+    2; %14
+    2; %15
+    3; %16
+    3; %17
+    3; %18
+    3; %19
+    3; %20
+    3; %21
+    3; %22
+    3; %23
+    3; %24
+    3]; %25
+batch.Setup.subjects.group_names = {'Alzheimers','MCI','Controls'};
+batch.Setup.subjects.add = 1;
+batch.Setup.subjects.analysisunits = 2;                     
+%batch.Setup.subjects.effect_names = {'Alzheimers','MCI','Controls'};
+%batch.Setup.subjects.effects{1} = [1;1;1;1;1;1;1;1;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;0];
+%batch.Setup.subjects.effects{2} = [0;0;0;0;0;0;0;0;1;1;1;1;1;1;1;0;0;0;0;0;0;0;0;0;0];
+%batch.Setup.subjects.effects{3} = [0;0;0;0;0;0;0;0;0;0;0;0;0;0;0;1;1;1;1;1;1;1;1;1;1];
+
+%The new setup settings are all set
+batch.Setup.isnew=1;
+batch.Setup.done=1;
+
+% CONN Denoising
+batch.Denoising.filter=[0 inf]; % no filtering
+batch.Denoising.detrending=0; % no detrending
+batch.Denoising.despiking=0; % no despiking
+batch.Denoising.confounds={}; % no removal of confounding effects
+batch.Denoising.done=1;
+batch.Denoising.overwrite='Yes';
+
+% CONN Analysis
+batch.Analysis.analysis_number=1;       % Sequential number identifying each set of independent first-level analyses
+batch.Analysis.measure=1;               % connectivity measure used {1 = 'correlation (bivariate)', 2 = 'correlation (semipartial)', 3 = 'regression (bivariate)', 4 = 'regression (multivariate)';
+batch.Analysis.weight=2;                % within-condition weight used {1 = 'none', 2 = 'hrf', 3 = 'hanning';
+batch.Analysis.sources={};              % (defaults to all ROIs)
+batch.Analysis.done=1;
+
+%CONN REsults
+%batch.Results.name = 'SBC_01';
+%batch.Results.between_subjects.effect_names = {'Alzheimers','MCI','Controls'};
+%batch.Results.between_subjects.contrast = [-1 1 0];
+
+
+%Running the CONN batch
+conn_batch(batch);
+
+
+%Initializing CONN GUI 
+conn
+conn('load',fullfile(cwd,'conn_adcnmci_compare4.mat'));
+
+%Displaying result
+conn gui_results
+
+
+%% functions for the program
+
+
+%function for replacing NaN in the cells
+function x = fixnan(x)
+%will work no matter how many levels, including if cells are not consistent types
+    if isnumeric(x)
+        x(isnan(x)) = 0;
+    elseif iscell(x)
+        x = cellfun(@fixnan, x, 'uniform', 0);
+    %else other types do nothing, return unchanged
+    end
+end
+
+
+
+function [new_mat,names] = confounds(mat,NSUBJECTS)
+
+%cell array for t_comp_cor
+for nsub =1:NSUBJECTS
+    try
+        var = '1';
+        a = mat{nsub}.('t_comp_cor_00');
+        var = '2';
+        %print('one')
+        b = mat{nsub}.('t_comp_cor_01');
+        var = '3';
+        c = mat{nsub}.('t_comp_cor_02');
+        var = '4';
+        d = mat{nsub}.('t_comp_cor_03');
+        %print('two')
+        t_comp_cor{nsub,1} = [mat{nsub}.('t_comp_cor_00') mat{nsub}.('t_comp_cor_01') mat{nsub}.('t_comp_cor_02') mat{nsub}.('t_comp_cor_03')];
+    catch
+        if var == '1'
+        t_comp_cor{nsub,1} = zeros(size(mat{nsub-1}.('t_comp_cor_00')));end
+        if var == '2'
+        t_comp_cor{nsub,1} = [a zeros(size(a)) zeros(size(a)) zeros(size(a))];end
+        if var == '3'
+        t_comp_cor{nsub,1} = [a b zeros(size(a)) zeros(size(a))];end
+        if var == '4'
+        t_comp_cor{nsub,1} = [a b c zeros(size(a))];end
+        
+        end
+        
+end
+ clear a b c d;     
+
+%cell array for a_comp_cor
+for nsub =1:NSUBJECTS
+    try
+        var = '1';
+        a = mat{nsub}.('a_comp_cor_00');
+        var = '2';
+        %print('one')
+        b = mat{nsub}.('a_comp_cor_01');
+        var = '3';
+        c = mat{nsub}.('a_comp_cor_02');
+        var = '4';
+        d = mat{nsub}.('a_comp_cor_03');
+        %print('two')
+        a_comp_cor{nsub,1} = [mat{nsub}.('a_comp_cor_00') mat{nsub}.('a_comp_cor_01') mat{nsub}.('a_comp_cor_02') mat{nsub}.('a_comp_cor_03')];
+    catch
+        if var == '1'
+        a_comp_cor{nsub,1} = zeros(size(mat{nsub-1}.('a_comp_cor_00')));end
+        if var == '2'
+        a_comp_cor{nsub,1} = [a zeros(size(a)) zeros(size(a)) zeros(size(a))];end
+        if var == '3'
+        a_comp_cor{nsub,1} = [a b zeros(size(a)) zeros(size(a))];end
+        if var == '4'
+        a_comp_cor{nsub,1} = [a b c zeros(size(a))];end
+        
+        end
+        
+end
+   
+clear a b c d; 
+%cell array for cosine
+for nsub =1:NSUBJECTS
+    try
+        var = '1';
+        a = mat{nsub}.('cosine00');
+        var = '2';
+        %print('one')
+        b = mat{nsub}.('cosine01');
+        var = '3';
+        c = mat{nsub}.('cosine02');
+        var = '4';
+        d = mat{nsub}.('cosine03');
+        %print('two')
+        cosine{nsub,1} = [mat{nsub}.('cosine00') mat{nsub}.('cosine01') mat{nsub}.('cosine02') mat{nsub}.('cosine03')];
+    catch
+        if var == '1'
+        cosine{nsub,1} = zeros(size(mat{nsub-1}.('cosine00')));end
+        if var == '2'
+        cosine{nsub,1} = [a zeros(size(a)) zeros(size(a)) zeros(size(a))];end
+        if var == '3'
+        cosine{nsub,1} = [a b zeros(size(a)) zeros(size(a))];end
+        if var == '4'
+        cosine{nsub,1} = [a b c zeros(size(a))];end
+        
+    end
+        
+    
+ clear a b c d; 
+ 
+%cell array for motion_outliers
+for nsub =1:NSUBJECTS
+    try
+        var = '1';
+        a = mat{nsub}.('motion_outlier00');
+        var = '2';
+        %print('one')
+        b = mat{nsub}.('motion_outlier01');
+        var = '3';
+        c = mat{nsub}.('motion_outlier02');
+        var = '4';
+        d = mat{nsub}.('motion_outlier03');
+        var = '5';
+        e = mat{nsub}.('motion_outlier04');
+        var = '6';
+        f = mat{nsub}.('motion_outlier05');
+        var = '7';
+        g = mat{nsub}.('motion_outlier06');
+        var = '8';
+        h = mat{nsub}.('motion_outlier07');
+        var = '9';
+        i = mat{nsub}.('motion_outlier08');
+        var = '10';
+        j = mat{nsub}.('motion_outlier09');
+        %print('two')
+        motion_outlier{nsub,1} = [mat{nsub}.('motion_outlier00') mat{nsub}.('motion_outlier01')...
+            mat{nsub}.('motion_outlier02') mat{nsub}.('motion_outlier03') mat{nsub}.('motion_outlier04')...
+            mat{nsub}.('motion_outlier05') mat{nsub}.('motion_outlier06') mat{nsub}.('motion_outlier07')...
+            mat{nsub}.('motion_outlier08') mat{nsub}.('motion_outlier09')];
+    catch
+        if var == '1'
+        motion_outlier{nsub,1} = zeros(size(mat{nsub}.('global_signal')));end
+        if var == '2'
+        motion_outlier{nsub,1} = [a zeros(size(a)) zeros(size(a)) zeros(size(a)) zeros(size(a)) zeros(size(a)) zeros(size(a)) zeros(size(a)) zeros(size(a)) zeros(size(a))];end
+        if var == '3'
+        motion_outlier{nsub,1} = [a b zeros(size(a)) zeros(size(a)) zeros(size(a)) zeros(size(a)) zeros(size(a)) zeros(size(a)) zeros(size(a)) zeros(size(a))];end
+        if var == '4'
+        motion_outlier{nsub,1} = [a b c zeros(size(a)) zeros(size(a)) zeros(size(a)) zeros(size(a)) zeros(size(a)) zeros(size(a)) zeros(size(a))];end
+        if var == '5'
+        motion_outlier{nsub,1} = [a b c d zeros(size(a)) zeros(size(a)) zeros(size(a)) zeros(size(a)) zeros(size(a)) zeros(size(a))];end
+        if var == '6'
+        motion_outlier{nsub,1} = [a b c d e zeros(size(a)) zeros(size(a)) zeros(size(a)) zeros(size(a)) zeros(size(a))];end
+        if var == '7'
+        motion_outlier{nsub,1} = [a b c d e f zeros(size(a)) zeros(size(a)) zeros(size(a)) zeros(size(a))];end
+        if var == '8'
+        motion_outlier{nsub,1} = [a b c d e f g zeros(size(a)) zeros(size(a)) zeros(size(a))];end
+        if var == '9'
+        motion_outlier{nsub,1} = [a b c d e f g h zeros(size(a)) zeros(size(a))];end
+        if var == '10'
+        motion_outlier{nsub,1} = [a b c d e f g h i zeros(size(a))];end
+        
+    end
+end
+                
+end
+    
+
+%j=1;
+for nsub = 1:NSUBJECTS
+new_mat{nsub,1,:} = mat{nsub}.('global_signal');
+new_mat{nsub,2,:} = mat{nsub}.('global_signal_derivative1');
+new_mat{nsub,3,:} = mat{nsub}.('global_signal_power2');
+new_mat{nsub,4,:} = mat{nsub}.('csf');
+new_mat{nsub,5,:} = mat{nsub}.('csf_power2');
+new_mat{nsub,6,:} = mat{nsub}.('white_matter');
+new_mat{nsub,7,:} = mat{nsub}.('white_matter_power2');
+new_mat{nsub,8,:} = mat{nsub}.('csf_wm');
+new_mat{nsub,9,:} = mat{nsub}.('tcompcor');
+new_mat{nsub,10,:} = mat{nsub}.('dvars');
+new_mat{nsub,11,:} = mat{nsub}.('framewise_displacement');
+new_mat{nsub,12,:} = mat{nsub}.('rmsd');
+new_mat{nsub,13,:} = t_comp_cor{nsub};
+new_mat{nsub,14,:} = a_comp_cor{nsub};
+new_mat{nsub,15,:} = cosine{nsub};
+new_mat{nsub,16,:} = mat{nsub}.('trans_x_derivative1');
+new_mat{nsub,17,:} = mat{nsub}.('trans_y');
+new_mat{nsub,18,:} = mat{nsub}.('trans_y_derivative1');
+new_mat{nsub,19,:} = mat{nsub}.('trans_z');
+new_mat{nsub,20,:} = mat{nsub}.('trans_z_derivative1');
+new_mat{nsub,21,:} = mat{nsub}.('rot_x');
+new_mat{nsub,22,:} = mat{nsub}.('rot_x_derivative1');
+new_mat{nsub,23,:} = mat{nsub}.('rot_y');
+new_mat{nsub,24,:} = mat{nsub}.('rot_y_derivative1');
+new_mat{nsub,25,:} = mat{nsub}.('rot_z');
+new_mat{nsub,26,:} = mat{nsub}.('rot_z_derivative1');
+new_mat{nsub,27,:} = motion_outlier{nsub};
+%j= j+1;
+end
+n=0;
+
+names = {'global_signal','global_signal_derivative1','global_signal_power2',...
+    'csf','csf_power2','white_matter','white_matter_power2','csf_wm',...
+    'tcompcor','dvars','framewise_displacement','rmsd','t_comp_cor','a_comp_cor',...
+    'cosine','trans_x_derivative1','trans_y','trans_y_derivative1','trans_z',...
+    'trans_z_derivative1','rot_x','rot_x_derivative1','rot_y','rot_y_derivative1',...
+    'rot_z','rot_z_derivative1','motion_outlier'};
+
+for nsub = 1:NSUBJECTS
+    
+%new_mat.Properties.VariableNames = {'global_signal','global_signal_derivative1','
+values = {new_mat{nsub,1,:} new_mat{nsub,2,:} new_mat{nsub,3,:} new_mat{nsub,4,:}...
+    new_mat{nsub,5,:} new_mat{nsub,6,:} new_mat{nsub,7,:} new_mat{nsub,8,:}...
+    new_mat{nsub,9,:} new_mat{nsub,10,:} new_mat{nsub,11,:} new_mat{nsub,12,:}...
+    new_mat{nsub,13,:} new_mat{nsub,14,:} new_mat{nsub,15,:} new_mat{nsub,16,:}...
+    new_mat{nsub,17,:} new_mat{nsub,18,:} new_mat{nsub,19,:} new_mat{nsub,20,:}...
+    new_mat{nsub,21,:} new_mat{nsub,22,:} new_mat{nsub,23,:} new_mat{nsub,24,:}...
+    new_mat{nsub,25,:} new_mat{nsub,26,:} new_mat{nsub,27,:}};
+struct1 = cell2struct(values,names,2);
+confounds_mat{nsub}= struct1;
+n=n+1;
+end
+
+%names = {'global_signal','global_signal_derivative1','global_signal_power2','csf','csf_power2','white_matter','white_matter_power2','csf_wm','tcompcor','dvars','framewise_displacement','rmsd','t_comp_cor','a_comp_cor','cosine','trans_x_derivative1','trans_y','trans_y_derivative1','trans_z','trans_z_derivative1','rot_x','rot_x_derivative1','rot_y','rot_y_derivative1','rot_z','rot_z_derivative1'};
+
+%n=0;
+%for nsub = 1:NSUBJECTS
+%values = {new_mat{1,1,:} new_mat{1,2,:} new_mat{1,3,:} new_mat{1,4,:} new_mat{1,5,:} new_mat{1,6,:} new_mat{1,7,:} new_mat{1,8,:} new_mat{1,9,:} new_mat{1,10,:} new_mat{1,11,:} new_mat{1,12,:} new_mat{1,13,:} new_mat{1,14,:} new_mat{1,15,:} new_mat{1,16,:} new_mat{1,17,:} new_mat{1,18,:} new_mat{1,19,:} new_mat{1,20,:} new_mat{1,21,:} new_mat{1,22,:} new_mat{1,23,:} new_mat{1,24,:} new_mat{1,25,:} new_mat{1,26,:}};
+%struct1 = cell2struct(values,names,2);
+%ncell{nsub}= struct1;
+%n=n+1;
+end
+end
